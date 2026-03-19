@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s      # scrape every 15 seconds as requested
+  evaluation_interval: 15s  # evaluate alerting rules at the same cadence
+
+scrape_configs:
+  - job_name: "go-load-balancer"
+    # The load balancer runs on the host machine, not inside Docker.
+    # host.docker.internal resolves to the host from inside a container.
+    #
+    # NOTE: The metrics endpoint is on :9090/metrics (a dedicated server
+    # separate from the proxy on :8080). Keeping them on different ports
+    # prevents a slow Prometheus scrape from queuing behind proxy traffic.
+    #
+    # On Linux you may need to add this to the prometheus service in
+    # docker-compose.yml:
+    #   extra_hosts:
+    #     - "host.docker.internal:host-gateway"
+    static_configs:
+      - targets: ["host.docker.internal:9090"]
+    metrics_path: /metrics

@@ -1,0 +1,13 @@
+# Grafana datasource provisioning — loaded automatically at startup.
+# This eliminates the manual "Add datasource" step in the UI.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # From inside Docker, host.docker.internal resolves to the host machine
+    # where the load balancer's metrics server is listening on :9090.
+    url: http://host.docker.internal:9090
+    isDefault: true
+    editable: true

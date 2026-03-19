@@ -1,0 +1,58 @@
+version: "3.9"
+
+# Spins up Prometheus + Grafana to visualise load balancer metrics.
+# The load balancer itself runs on the host (via `go run .`) and is
+# reachable from containers via host.docker.internal.
+#
+# Ports:
+#   :9091  → Prometheus UI
+#   :3000  → Grafana UI  (admin / admin)
+#
+# Grafana's Prometheus datasource is provisioned automatically — no
+# manual setup needed after `docker compose up`.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: lb_prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      # Allow Grafana to issue remote_read queries.
+      - "--web.enable-remote-write-receiver"
+    ports:
+      - "9091:9090"   # Prometheus UI → http://localhost:9091
+    # On Linux: uncomment the extra_hosts block so host.docker.internal works.
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: lb_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Disable the "install plugins" banner for a cleaner first-run UX.
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Mount provisioning config so the Prometheus datasource is wired
+      # automatically — no manual "Add datasource" click required.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"   # Grafana UI → http://localhost:3000
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:   # persists metrics across container restarts
+  grafana_data:      # persists dashboards and user settings

@@ -1,0 +1,38 @@
+server:
+  address: ":8080"
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 90s
+
+# Upstream backends. Weight is only used by weighted_round_robin.
+# Backend :8083 carries 2× the traffic of :8081 and :8082.
+backends:
+  - url: "http://localhost:8081"
+    weight: 1
+  - url: "http://localhost:8082"
+    weight: 1
+  - url: "http://localhost:8083"
+    weight: 2
+
+balancer:
+  # Options: round_robin | least_conn | weighted_round_robin
+  algorithm: weighted_round_robin
+
+health:
+  interval: 10s
+  timeout: 2s
+  path: /health
+
+rate_limit:
+  enabled: true
+  rate: 100    # requests per second per client IP
+  burst: 200   # maximum burst size
+
+circuit_breaker:
+  enabled: true
+  max_failures: 5
+  timeout: 30s
+
+metrics:
+  enabled: true
+  path: /metrics
