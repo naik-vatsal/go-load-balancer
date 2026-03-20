@@ -100,6 +100,14 @@ func run(logger *slog.Logger) error {
 		)
 	}
 
+	// Seed lb_backend_healthy for every backend to 1 (optimistic start).
+	// Without this, the gauge is absent from /metrics until the first
+	// health transition fires, which means a "backend went unhealthy" alert
+	// can't distinguish "never seen" from "currently healthy".
+	for _, b := range pool.Backends() {
+		m.BackendHealthy.WithLabelValues(b.URL.String()).Set(1)
+	}
+
 	// ── Health checker ──────────────────────────────────────────────────
 	checker := health.New(health.Config{
 		Pool:     pool,
@@ -122,6 +130,7 @@ func run(logger *slog.Logger) error {
 		CircuitBreakers: cbRegistry,
 		MaxRetries:      2,
 		Logger:          logger,
+		Metrics:         m,
 	}, pool)
 
 	// ── Middleware stack ─────────────────────────────────────────────────

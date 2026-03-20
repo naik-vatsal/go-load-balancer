@@ -20,8 +20,11 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/naik-vatsal/go-load-balancer/balancer"
+	"github.com/naik-vatsal/go-load-balancer/metrics"
 	"github.com/naik-vatsal/go-load-balancer/middleware"
 )
 
@@ -34,10 +37,11 @@ type backendProxy struct {
 
 // Config bundles all Proxy dependencies.
 type Config struct {
-	Balancer       balancer.Balancer
+	Balancer        balancer.Balancer
 	CircuitBreakers *middleware.CircuitBreakerRegistry
-	MaxRetries     int
-	Logger         *slog.Logger
+	MaxRetries      int
+	Logger          *slog.Logger
+	Metrics         *metrics.Metrics // nil disables instrumentation
 }
 
 // Proxy is an http.Handler that forwards requests to upstream backends.
@@ -46,6 +50,7 @@ type Proxy struct {
 	cbs            *middleware.CircuitBreakerRegistry
 	maxRetries     int
 	logger         *slog.Logger
+	met            *metrics.Metrics
 	// backendProxies maps backend URL string → its dedicated reverse proxy.
 	// Built once at startup; read-only during serving.
 	backendProxies map[string]*httputil.ReverseProxy
@@ -72,6 +77,7 @@ func New(cfg Config, pool *balancer.Pool) *Proxy {
 		cbs:            cfg.CircuitBreakers,
 		maxRetries:     cfg.MaxRetries,
 		logger:         cfg.Logger,
+		met:            cfg.Metrics,
 		backendProxies: bps,
 	}
 }
@@ -101,8 +107,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Track active connections for least-conn accuracy.
+		// Track active connections for least-conn accuracy and for the
+		// lb_active_connections gauge so Prometheus sees in-flight counts.
 		backend.IncrConns()
+		if p.met != nil {
+			p.met.ActiveConnections.WithLabelValues(backend.URL.Host).Inc()
+		}
+
 		rw := &responseWriter{ResponseWriter: w}
 		rp, ok := p.backendProxies[backend.URL.String()]
 		if !ok {
@@ -110,8 +121,25 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rp = newReverseProxy(backend.URL)
 		}
 
+		start := time.Now()
 		rp.ServeHTTP(rw, r)
+		duration := time.Since(start)
+
 		backend.DecrConns()
+		if p.met != nil {
+			p.met.ActiveConnections.WithLabelValues(backend.URL.Host).Dec()
+		}
+
+		// Record per-attempt request count and latency. We do this for every
+		// attempt (including retried ones) so operators can see which backends
+		// are slow or error-prone independently.
+		if p.met != nil {
+			p.met.RequestsTotal.WithLabelValues(backend.URL.Host, r.Method).Inc()
+			p.met.RequestDuration.WithLabelValues(
+				backend.URL.Host,
+				strconv.Itoa(rw.status),
+			).Observe(duration.Seconds())
+		}
 
 		// Update circuit breaker with the result.
 		if p.cbs != nil {
@@ -130,6 +158,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"backend", backend.URL.Host,
 				"status", rw.status,
 				"attempt", attempt)
+			if p.met != nil {
+				p.met.RetriesTotal.WithLabelValues(backend.URL.Host).Inc()
+			}
 			continue
 		}
 
