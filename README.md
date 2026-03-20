@@ -1,4 +1,4 @@
-# go-load-balancer
+# Arbiter — _Intelligent HTTP Load Balancer_
 
 A layer-7 HTTP load balancer written in Go that distributes traffic across upstream backends with health checking, circuit breaking, rate limiting, and Prometheus observability — built from scratch using only the standard library and two dependencies.
 
